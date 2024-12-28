@@ -10,13 +10,12 @@ from torch.utils.data import Dataset
 from torch.nn import functional as F
 import random
 from scipy.ndimage import convolve
-
-class SSDataset_Smoothing(Dataset):
-    def __init__(self, df, data_path, tokenizer, aug=None, smooth=0.1):
+    
+class SSDataset_test(Dataset):
+    def __init__(self, df, data_path, tokenizer):
         self.df = df
         self.data_path = data_path
         self.tokenizer = tokenizer
-        self.smooth = smooth
         print(f'len of dataset: {len(self.df)}')
 
     def __len__(self):
@@ -29,25 +28,8 @@ class SSDataset_Smoothing(Dataset):
         file_name = row['file_name']
         file_path = os.path.join(self.data_path, str(file_name) + '.npy')
         ct = np.load(file_path)
-        smooth_ct = self.label_smoothing(ct)
-        return seq, ct, smooth_ct
 
-    def label_smoothing(self, contact_map):
-        # Define the kernel for the surrounding area
-        kernel = np.array([[self.smooth, self.smooth, self.smooth],
-                        [self.smooth, 0.0, self.smooth],
-                        [self.smooth, self.smooth, self.smooth]])
-        
-        # Convolve the contact map with the kernel
-        smoothed_map = convolve(contact_map.astype(float), kernel, mode='constant', cval=0.0)
-        
-        # Clip the values to be at most self.smooth
-        smoothed_map = np.clip(smoothed_map, 0, self.smooth)
-        
-        # Where the original map is 1, we keep it 1
-        smoothed_map[contact_map == 1] = 1.0
-        
-        return smoothed_map
+        return seq, ct, file_name
 
 class SSDataset(Dataset):
     def __init__(self, df, data_path, tokenizer, aug=None, smooth = None):
@@ -95,12 +77,47 @@ class SSDataset(Dataset):
         
         return smoothed_map
 
+class SSDataset_merge(Dataset):
+    def __init__(self, df, data_path, tokenizer, aug=None, smooth=None):
+        self.df = df
+        self.data_paths = data_path  # 列表包含两个路径
+        self.tokenizer = tokenizer
+        print(f'len of dataset: {len(self.df)}')
+        self.aug = aug
+        self.smooth = smooth
+    
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        seq = row['seq']
+        seq = seq.replace('U', 'T')
+        file_name = row['file_name']
+        
+        # 尝试从两个路径加载
+        for path in self.data_paths:
+            file_path = os.path.join(path, str(file_name) + '.npy')
+            if os.path.exists(file_path):
+                ct = np.load(file_path)
+                break
+
+        if self.aug:
+            seq = self.aug(seq, ct)
+        
+        if self.smooth:
+            smooth_ct = self.label_smoothing(ct)
+            return seq, ct, smooth_ct
+        else:
+            return seq, ct, None
+
 class Augmentation:
-    def __init__(self, select, replace, seed=42):
+    def __init__(self, select, replace, seed=42, mode='cov'):
         self.select = select
         self.replace = replace
-        # self.seed = seed
-        # random.seed(self.seed)
+        self.seed = seed
+        self.mode = mode
+        random.seed(self.seed)
 
     def __call__(self, seq, ct):
         # 如果随机数大于 select，则不进行替换
@@ -116,53 +133,64 @@ class Augmentation:
 
         seq_original = seq
 
-        for x, y in pairs:
-            if random.random() < self.replace: # 由于online是用在replace(u,t)之后的，所以都是t
-                if ((seq_original[x] == 'A') & (seq_original[y] == 'T'))|((seq_original[x] == 'T') & (seq_original[y] == 'A')):
-                    if random.random() < 7.24/(7.24+46.3): # Wobble
-                        if random.random() < 0.5:
-                            seq = seq[:x] + 'T' + seq[x+1:]
-                            seq = seq[:y] + 'G' + seq[y+1:]
-                        else:
-                            seq = seq[:x] + 'G' + seq[x+1:]
-                            seq = seq[:y] + 'T' + seq[y+1:]
-                    else: # GC
-                        if random.random() < 0.5:
-                            seq = seq[:x] + 'G' + seq[x+1:]
-                            seq = seq[:y] + 'C' + seq[y+1:]
-                        else:
-                            seq = seq[:x] + 'C' + seq[x+1:]
-                            seq = seq[:y] + 'G' + seq[y+1:]
-                elif ((seq_original[x] == 'C') & (seq_original[y] == 'G'))|((seq_original[x] == 'G') & (seq_original[y] == 'C')):
-                    if random.random() < 7.24/(7.24+25.77): # Wobble
-                        if random.random() < 0.5:
-                            seq = seq[:x] + 'G' + seq[x+1:]
-                            seq = seq[:y] + 'T' + seq[y+1:]
-                        else:
-                            seq = seq[:x] + 'T' + seq[x+1:]
-                            seq = seq[:y] + 'G' + seq[y+1:]
-                    else: # AU
-                        if random.random() < 0.5:
-                            seq = seq[:x] + 'A' + seq[x+1:]
-                            seq = seq[:y] + 'T' + seq[y+1:]
-                        else:
-                            seq = seq[:x] + 'T' + seq[x+1:]
-                            seq = seq[:y] + 'A' + seq[y+1:]
-                elif ((seq_original[x] == 'G') & (seq_original[y] == 'T'))|((seq_original[x] == 'T') & (seq_original[y] == 'G')):
-                    if random.random() < 25.77/(25.77+46.3): # AU
-                        if random.random() < 0.5:
-                            seq = seq[:x] + 'A' + seq[x+1:]
-                            seq = seq[:y] + 'T' + seq[y+1:]
-                        else:
-                            seq = seq[:x] + 'T' + seq[x+1:]
-                            seq = seq[:y] + 'A' + seq[y+1:]
-                    else: # GC
-                        if random.random() < 0.5:
-                            seq = seq[:x] + 'G' + seq[x+1:]
-                            seq = seq[:y] + 'C' + seq[y+1:]
-                        else:
-                            seq = seq[:x] + 'C' + seq[x+1:]
-                            seq = seq[:y] + 'G' + seq[y+1:]
+        if self.mode == 'cov':
+            for x, y in pairs:
+                if random.random() < self.replace: # 由于online是用在replace(u,t)之后的，所以都是t
+                    if ((seq_original[x] == 'A') & (seq_original[y] == 'T'))|((seq_original[x] == 'T') & (seq_original[y] == 'A')):
+                        if random.random() < 7.24/(7.24+46.3): # Wobble
+                            if random.random() < 0.5:
+                                seq = seq[:x] + 'T' + seq[x+1:]
+                                seq = seq[:y] + 'G' + seq[y+1:]
+                            else:
+                                seq = seq[:x] + 'G' + seq[x+1:]
+                                seq = seq[:y] + 'T' + seq[y+1:]
+                        else: # GC
+                            if random.random() < 0.5:
+                                seq = seq[:x] + 'G' + seq[x+1:]
+                                seq = seq[:y] + 'C' + seq[y+1:]
+                            else:
+                                seq = seq[:x] + 'C' + seq[x+1:]
+                                seq = seq[:y] + 'G' + seq[y+1:]
+                    elif ((seq_original[x] == 'C') & (seq_original[y] == 'G'))|((seq_original[x] == 'G') & (seq_original[y] == 'C')):
+                        if random.random() < 7.24/(7.24+25.77): # Wobble
+                            if random.random() < 0.5:
+                                seq = seq[:x] + 'G' + seq[x+1:]
+                                seq = seq[:y] + 'T' + seq[y+1:]
+                            else:
+                                seq = seq[:x] + 'T' + seq[x+1:]
+                                seq = seq[:y] + 'G' + seq[y+1:]
+                        else: # AU
+                            if random.random() < 0.5:
+                                seq = seq[:x] + 'A' + seq[x+1:]
+                                seq = seq[:y] + 'T' + seq[y+1:]
+                            else:
+                                seq = seq[:x] + 'T' + seq[x+1:]
+                                seq = seq[:y] + 'A' + seq[y+1:]
+                    elif ((seq_original[x] == 'G') & (seq_original[y] == 'T'))|((seq_original[x] == 'T') & (seq_original[y] == 'G')):
+                        if random.random() < 25.77/(25.77+46.3): # AU
+                            if random.random() < 0.5:
+                                seq = seq[:x] + 'A' + seq[x+1:]
+                                seq = seq[:y] + 'T' + seq[y+1:]
+                            else:
+                                seq = seq[:x] + 'T' + seq[x+1:]
+                                seq = seq[:y] + 'A' + seq[y+1:]
+                        else: # GC
+                            if random.random() < 0.5:
+                                seq = seq[:x] + 'G' + seq[x+1:]
+                                seq = seq[:y] + 'C' + seq[y+1:]
+                            else:
+                                seq = seq[:x] + 'C' + seq[x+1:]
+                                seq = seq[:y] + 'G' + seq[y+1:]
+        
+        elif self.mode == 'cg': # 配对部分全部替换为GC/CG
+            for x, y in pairs:
+                if random.random() < self.replace:
+                    if random.random() < 0.5:
+                        seq = seq[:x] + 'C' + seq[x+1:]
+                        seq = seq[:y] + 'G' + seq[y+1:]
+                    else:
+                        seq = seq[:x] + 'G' + seq[x+1:]
+                        seq = seq[:y] + 'C' + seq[y+1:]
 
         return seq
 
@@ -865,194 +893,6 @@ class SSCNNPredictor_rnafm2(nn.Module):
 
         return x
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
-        super(PositionalEncoding, self).__init__()
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
-        return x
-
-class RNAEnergyPredictorWithTransformer(nn.Module):
-    def __init__(self, embedding_dim, hidden_dim, nhead, num_encoder_layers, dim_feedforward):
-        super(RNAEnergyPredictorWithTransformer, self).__init__()
-        self.positional_encoding = PositionalEncoding(embedding_dim)
-        encoder_layers = nn.TransformerEncoderLayer(embedding_dim, nhead, dim_feedforward)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_encoder_layers)
-        self.fc = nn.Linear(embedding_dim, 1)
-
-    def forward(self, src):
-        src = self.positional_encoding(src)
-        output = self.transformer_encoder(src)
-        # 假设我们关注的是全局信息，取最后一个向量进行预测
-        output = output[-1, :, :]
-        energy = self.fc(output)
-        return energy.squeeze(1) # 压缩掉单维度
-    
-class SSCNNPredictor_energy(nn.Module):
-    def __init__(self, extractor, esmconfig, is_freeze = False):
-        super(SSCNNPredictor_energy, self).__init__()
-        self.extractor = extractor
-        self.esmconfig = esmconfig
-        # self.cnn = renet_b16(myChannels=esmconfig.hidden_size, bbn=16)
-        self.energy = RNAEnergyPredictorWithTransformer(esmconfig.hidden_size, 128, 8, 6, 512)
-        self.cnn = PairwiseConcatWithResNet(esmconfig, num_res_layers=16)
-
-        self.is_freeze = is_freeze
-        if is_freeze:
-            for param in self.extractor.parameters():
-                param.detach_()
-            self.extractor.eval()
-        
-        self.max_len = 512
-        # self.energy = nn.Linear(128, 1)
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        self.fc = nn.Linear(16 * self.max_len//2 * self.max_len//2, 1)
-        
-    def forward(self, data_dict):
-        input_ids, attention_mask = data_dict['input_ids'], data_dict['attention_mask']
-
-        if self.is_freeze:
-            with torch.no_grad():
-                output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-        else:
-            output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-
-        hidden_states = output[1]
-        ## L*ch-> LxL*ch
-        hidden_states = hidden_states[:,1:-1,:]
-        # b,l,e
-        e = self.energy(hidden_states)
-        x = self.cnn(hidden_states)
-        batch_size, seq_len, _ = x.shape
-        
-        # e = x.unsqueeze(1)
-        # e = F.pad(e, (0, self.max_len - seq_len, 0, self.max_len - seq_len), "constant", 0)
-        # mask = attention_mask[:,1:-1] # B, L
-        # true_lengths = torch.sum(mask, dim=1)
-        # expanded_mask = torch.zeros((mask.shape[0], self.max_len, self.max_len), dtype=torch.float32)
-        # for i in range(expanded_mask.shape[0]):
-        #     expanded_mask[i, :true_lengths[i], :true_lengths[i]] = 1
-        # mask = expanded_mask.unsqueeze(1)
-        # mask = mask.to(device=x.device)
-        # e = e * mask
-        # e = self.conv1(e)
-        # e = torch.relu(e)
-        # e = self.pool(e)
-        # e = torch.flatten(e, 1)
-        # e = self.fc(e)
-        
-        x = x.squeeze(-1)
-        
-        return x, e
-
-class SSPredictor_recycle(nn.Module):
-    def __init__(self, extractor, esmconfig, recycle = 0, is_freeze = False, is_pairwise = False):
-        super(SSPredictor_recycle, self).__init__()
-        self.recycle = recycle
-        self.extractor = extractor
-        self.esmconfig = esmconfig
-        
-        # expand or pairwiseconcat?
-        if is_pairwise:
-            self.expand = PairwiseOnly(esmconfig)
-            self.recycle_norm = nn.LayerNorm(256)
-            self.cnn = ResNet(esmconfig,embed_reduction=256)
-        else:
-            self.expand = Axialattn(esmconfig)
-            self.recycle_norm = nn.LayerNorm(128)
-            self.cnn = ResNet(esmconfig,embed_reduction=128)
-
-        self.is_freeze = is_freeze
-        if is_freeze:
-            for param in self.extractor.parameters():
-                param.detach_()
-            self.extractor.eval()
-
-    def forward(self, data_dict):
-        input_ids, attention_mask = data_dict['input_ids'], data_dict['attention_mask']
-
-        if self.is_freeze:
-            with torch.no_grad():
-                output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-        else:
-            output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-
-        hidden_states = output[1]
-        hidden_states = hidden_states[:,1:-1,:] # bs,l,e
-        expanded = self.expand(hidden_states) # bs,l,l,e
-        
-        # latent = torch.zeros((expanded.shape[0], 1, expanded.shape[2], expanded.shape[3]), requires_grad=True) # bs,1,l,e
-        latent = torch.zeros_like(expanded, requires_grad=True)
-        if self.recycle > 0:
-            n_cycles = torch.randint(2, self.recycle + 1, [1])
-            with torch.no_grad():
-                for i in range(n_cycles - 1):
-                    # latent = latent.expand_as(expanded).detach().to(expanded.device).permute(0, 2, 3, 1) # bs,l,l,e
-                    res_latent = expanded.detach() + self.recycle_norm(latent).permute(0, 3, 1, 2)
-                    latent = self.cnn(res_latent)
-                    latent = latent.squeeze(-1).squeeze(2)
-            res_latent = expanded + latent.expand_as(expanded).to(expanded.device)
-            x = self.cnn(res_latent)
-        else:
-            x = self.cnn(expanded)
-        
-        x = x.squeeze(-1)
-        x = x.squeeze(1)
-        return x
-
-class SSPredictor_recycle2(nn.Module):
-    def __init__(self, extractor, esmconfig, recycle = 0, is_freeze = False, is_pairwise = False):
-        super(SSPredictor_recycle2, self).__init__()
-        self.recycle = recycle
-        self.extractor = extractor
-        self.esmconfig = esmconfig
-        
-        # expand or pairwiseconcat?
-        if is_pairwise:
-            self.expand = PairwiseOnly(esmconfig)
-            self.recycle_norm = nn.LayerNorm(256)
-            self.cnn = ResNet_recycle(esmconfig, recycle, embed_reduction=256)
-        else:
-            self.expand = Axialattn(esmconfig)
-            self.recycle_norm = nn.LayerNorm(128)
-            self.cnn = ResNet_recycle(esmconfig,recycle,embed_reduction=128)
-
-        self.is_freeze = is_freeze
-        if is_freeze:
-            for param in self.extractor.parameters():
-                param.detach_()
-            self.extractor.eval()
-
-    def forward(self, data_dict,training):
-        input_ids, attention_mask = data_dict['input_ids'], data_dict['attention_mask']
-        # print(input_ids.shape)
-        if self.is_freeze:
-            with torch.no_grad():
-                output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-        else:
-            output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-
-        hidden_states = output[1]
-        hidden_states = hidden_states[:,1:-1,:] # bs,l,e
-        expanded = self.expand(hidden_states) # bs,l,l,e
-        
-        x = self.cnn(expanded,training)
-        
-        x = x.squeeze(-1)
-        x = x.squeeze(1)
-        # print(x.shape)
-        return x
-    
-
 class SSPredictor_PositionBias(nn.Module):
     def __init__(self, extractor, esmconfig, is_freeze = False, is_pairwise = True):
         super(SSPredictor_PositionBias, self).__init__()
@@ -1336,108 +1176,6 @@ class CustomAttention(nn.Module):
         out = (attn @ v.squeeze(0)).transpose(1, 2).reshape(B, N, C)
         out = self.proj(out)
         return out
-
-class CustomViTBlock(nn.Module):
-    def __init__(self, embed_dim, num_heads, mlp_dim, dropout=0.1):
-        super(CustomViTBlock, self).__init__()
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = CustomAttention(embed_dim, num_heads)
-        self.norm2 = nn.LayerNorm(embed_dim)
-        self.mlp = nn.Sequential(
-            nn.Linear(embed_dim, mlp_dim),
-            nn.GELU(),
-            nn.Linear(mlp_dim, embed_dim),
-            nn.Dropout(dropout)
-        )
-
-    def forward(self, x):
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
-        return x
-
-class CustomViT(nn.Module):
-    def __init__(self, img_size, patch_size, in_channels, embed_dim, depth, num_heads, mlp_dim, num_classes):
-        super(CustomViT, self).__init__()
-        self.patch_embed = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, (img_size // patch_size) ** 2 + 1, embed_dim))
-        self.pos_drop = nn.Dropout(0.1)
-
-        self.blocks = nn.ModuleList([
-            CustomViTBlock(embed_dim, num_heads, mlp_dim) for _ in range(depth)
-        ])
-        self.norm = nn.LayerNorm(embed_dim)
-        self.head = nn.Linear(embed_dim, num_classes)
-
-    def forward(self, x):
-        B = x.shape[0]
-        x = self.patch_embed(x).flatten(2).transpose(1, 2)
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-        x = self.pos_drop(x + self.pos_embed)
-
-        for blk in self.blocks:
-            x = blk(x)
-
-        x = self.norm(x)
-        cls_token_final = x[:, 0]
-        x = self.head(cls_token_final)
-        return x
-
-class CustomViTModel(nn.Module):
-    def __init__(self, img_size, patch_size, in_channels, embed_dim, depth, num_heads, mlp_dim, num_classes, extractor, esmconfig, is_freeze=False, is_pairwise=False):
-        super(CustomViTModel, self).__init__()
-        self.extractor = extractor
-        self.esmconfig = esmconfig
-        self.is_freeze = is_freeze
-
-        self.vit = CustomViT(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_channels=in_channels,
-            embed_dim=embed_dim,
-            depth=depth,
-            num_heads=num_heads,
-            mlp_dim=mlp_dim,
-            num_classes=num_classes
-        )
-
-        if is_pairwise:
-            self.expand = PairwiseOnly(esmconfig)
-            self.recycle_norm = nn.LayerNorm(256)
-            self.cnn = MultiScaleResNet(esmconfig, embed_reduction=256)
-        else:
-            self.expand = Axialattn(esmconfig)
-            self.recycle_norm = nn.LayerNorm(128)
-            self.cnn = MultiScaleResNet(esmconfig, embed_reduction=128)
-
-        if is_freeze:
-            for param in self.extractor.parameters():
-                param.detach_()
-            self.extractor.eval()
-
-    def forward(self, data_dict):
-        input_ids, attention_mask = data_dict['input_ids'], data_dict['attention_mask']
-
-        if self.is_freeze:
-            with torch.no_grad():
-                output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-        else:
-            output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
-
-        hidden_states = output[1]
-        hidden_states = hidden_states[:, 1:-1, :]
-        x = self.expand(hidden_states)  # bs, e, l, l
-
-        b, e, l, _ = x.size()
-        x = x.view(b, e, l * l).permute(2, 0, 1)
-
-        x = self.vit(x)
-
-        x = self.decoder(x)
-        x = x.permute(1, 0, 2).view(b, l, l)
-        
-        return x
 
 class rnafm_cnn(nn.Module):
     def __init__(self, extractor, is_freeze = False):

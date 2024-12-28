@@ -1,10 +1,5 @@
 import torch
 import torch.nn as nn
-import sys 
-# sys.path.insert(0, sys.path[0]+"/../")
-sys.path.append('/home/bingxing2/ailab/scxlab0027/projects/RNASSPrediction')
-# from RNAformer.module.embedding import EmbedSequence2Matrix
-# from RNAformer_stack import RNAformerStack
 
 import math
 import torch
@@ -13,15 +8,11 @@ import torch.nn.functional as F
 
 import torch.nn as nn
 
-# from RNAformer.module.feed_forward import FeedForward, ConvFeedForward
-# from RNAformer.module.axial_attention import AxialAttention, TriangleAttention
-from types import SimpleNamespace as SimpleNestedNamespace
 import numpy as np
 import torch
 import math
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-import warnings
 import torch.nn.functional as F
 from einops import rearrange, repeat
 
@@ -171,15 +162,6 @@ class Attention2d(nn.Module):
 
         if self.softmax_scale:
             attn_weights *= self.softmax_scale.to(pair_act.device)
-        
-        # if self.posbias:
-        #     # print(attn_weights.shape, bias.shape)
-        #     # bias = bias.unsqueeze(2).unsqueeze(4)
-        #     # bias = bias.unsqueeze(1).unsqueeze(2)
-        #     attn_weights *= bias
-            # for i in range(bias.shape[0]):
-            #     attn_weights[i] += bias[i]
-            
 
         if attention_mask is not None:
             attention_mask = attention_mask[:, :, None, None, :]
@@ -468,19 +450,15 @@ class RNAformerBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        if config['rotary_emb']:
-            self.attn_pair_row = AxialAttention(config, 'per_row')
-            self.attn_pair_col = AxialAttention(config, 'per_column')
-        else:
-            self.attn_pair_row = TriangleAttention(config['model_dim'], config['num_head'], 'per_row', config['softmax_scale'],
-                                                   config['precision'], config['zero_init'], config['use_bias'],
-                                                   config['flash_attn'],
-                                                   config['initializer_range'], config['n_layers'], config['posbias'])
-            self.attn_pair_col = TriangleAttention(config['model_dim'], config['num_head'], 'per_column',
-                                                   config['softmax_scale'],
-                                                   config['precision'], config['zero_init'], config['use_bias'],
-                                                   config['flash_attn'],
-                                                   config['initializer_range'], config['n_layers'], config['posbias'])
+        self.attn_pair_row = TriangleAttention(config['model_dim'], config['num_head'], 'per_row', config['softmax_scale'],
+                                                config['precision'], config['zero_init'], config['use_bias'],
+                                                config['flash_attn'],
+                                                config['initializer_range'], config['n_layers'], config['posbias'])
+        self.attn_pair_col = TriangleAttention(config['model_dim'], config['num_head'], 'per_column',
+                                                config['softmax_scale'],
+                                                config['precision'], config['zero_init'], config['use_bias'],
+                                                config['flash_attn'],
+                                                config['initializer_range'], config['n_layers'], config['posbias'])
 
         self.pair_dropout_row = nn.Dropout(p=config['resi_dropout'] / 2)
         self.pair_dropout_col = nn.Dropout(p=config['resi_dropout'] / 2)
@@ -497,8 +475,6 @@ class RNAformerBlock(nn.Module):
         pair_act = pair_act + self.pair_dropout_row(self.attn_pair_row(pair_act, pair_mask, bias, cycle_infer))
         pair_act = pair_act + self.pair_dropout_col(self.attn_pair_col(pair_act, pair_mask, bias, cycle_infer))
         pair_act = pair_act + self.res_dropout(self.pair_transition(pair_act))
-        # print(pair_act.shape, bias.shape)
-        # pair_act *= bias
 
         return pair_act
 
@@ -594,25 +570,6 @@ class PosEmbedding(nn.Module):
 
         return seq_embed
 
-
-# class EmbedSequence2Matrix(nn.Module):
-#     def __init__(self, config):
-#         super().__init__()
-
-#         self.pos_embedding = config['pos_embedding']
-
-#         if config['pos_embedding']:
-#             self.src_embed_1 = PosEmbedding(config.seq_vocab_size, config['model_dim'], config.max_len,
-#                                             config.rel_pos_enc, config['initializer_range'])
-#             self.src_embed_2 = PosEmbedding(config.seq_vocab_size, config['model_dim'], config.max_len,
-#                                             config.rel_pos_enc, config['initializer_range'])
-#         else:
-#             self.src_embed_1 = nn.Embedding(config.seq_vocab_size, config['model_dim'])
-#             self.src_embed_2 = nn.Embedding(config.seq_vocab_size, config['model_dim'])
-#             self.scale = nn.Parameter(torch.sqrt(torch.FloatTensor([config['model_dim'] // 2])), requires_grad=False)
-
-#         self.norm = nn.LayerNorm(config['model_dim'], eps=config['ln_eps'], elementwise_affine=config['learn_ln'])
-
 class PairwiseOnly(nn.Module):
     """
     contact predictor with pairwise concat
@@ -623,51 +580,6 @@ class PairwiseOnly(nn.Module):
         """
         super().__init__()
         self.embed_dim_in = 1056
-
-        self.num_classes = 1
-        self.symmetric = True
-
-        self.embed_reduction = embed_reduction
-        if self.embed_reduction != -1:
-            self.embed_dim_out = self.embed_reduction
-            self.pre_reduction = nn.Linear(self.embed_dim_in, self.embed_dim_out)
-        else:
-            self.embed_dim_out = self.embed_dim_in
-            self.pre_reduction = None
-
-        # self.proj = Lin2D(self.embed_dim_out * 2, self.num_classes)  #nn.Conv2d(self.embed_dim_out * 2, self.num_classes, kernel_size=1)
-
-    def forward(self,  inputs):
-        # embeddings = inputs.last_hidden_state
-        embeddings = inputs
-        if len(embeddings.size()) == 3:       # for seq
-            batch_size, seqlen, hiddendim = embeddings.size()                    # B, L, E
-
-
-        # embedding dim reduction
-        if self.embed_reduction != -1:
-            embeddings = self.pre_reduction(embeddings)
-            hiddendim = self.embed_reduction
-
-
-        # cosine similarity L*L pairwise concat
-        embeddings = embeddings.unsqueeze(2).expand(batch_size, seqlen, seqlen, hiddendim)
-        embedding_T = embeddings.permute(0, 2, 1, 3)
-        pairwise_concat_embedding = torch.cat([embeddings, embedding_T], dim=3) # B, L, L, 2E
-        pairwise_concat_embedding = pairwise_concat_embedding.permute(0, 3, 1, 2) # B, 2E, L, L
-        
-        return pairwise_concat_embedding
-
-class PairwiseOnly_fm(nn.Module):
-    """
-    contact predictor with pairwise concat
-    """
-    def __init__(self,hidden_size=256, embed_reduction=128):
-        """
-        :param depth_reduction: mean, first, (adaptive)
-        """
-        super(PairwiseOnly_fm, self).__init__()
-        self.embed_dim_in = hidden_size
 
         self.num_classes = 1
         self.symmetric = True
@@ -796,7 +708,6 @@ class RiboFormer(nn.Module):
 
     # def forward(self, src_seq, src_len, pdb_sample, max_cycle=0):
     def forward(self, data_dict, max_cycle=0):
-        # breakpoint()
         # pair_mask = self.make_pair_mask(src_seq, src_len)
         input_ids = data_dict['input_ids']
         attention_mask = data_dict['attention_mask']
@@ -809,155 +720,12 @@ class RiboFormer(nn.Module):
         else:
             output = self.extractor(tokens=input_ids, attn_mask=attention_mask)
 
-        # if self.use_pdb:
-        #     pair_latent = pair_latent + self.pdf_embedding(pdb_sample)[:, None, None, :]
         hidden_states = output[1]
-        # hidden_states = hidden_states[:,1:-1,:] # b, l, e
         pair_latent = self.expand(hidden_states) # b, e, l ,l
-        # breakpoint()
         pair_latent = pair_latent.permute(0,2,3,1) # b, l, l, e
 
         pair_mask = self.make_pair_mask(input_ids, data_dict['seq_len'])
-        # print(data_dict['seq_len'])
 
-        # if self.cycling:
-        #     if self.training:
-        #         n_cycles = torch.randint(0, max_cycle + 1, [1])
-        #         if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-        #             n_cycles = n_cycles.to(torch.int64).cuda()
-        #             tensor_list = [torch.zeros(1, dtype=torch.int64).cuda() for _ in
-        #                            range(torch.distributed.get_world_size())]
-        #             torch.distributed.all_gather(tensor_list, n_cycles)
-        #             n_cycles = tensor_list[0]
-        #         n_cycles = n_cycles.item()
-        #     else:
-        #         n_cycles = self.cycle_steps
-
-        #     cyc_latent = torch.zeros_like(pair_latent)
-        #     for n in range(n_cycles - 1):
-        #         res_latent = pair_latent.detach() + self.recycle_pair_norm(cyc_latent.detach()).detach()
-        #         cyc_latent = self.cycle_riboformer(res_latent, pair_mask.detach(), bias.detach())
-            
-        #     # cyc_latent = cyc_latent.permute(0,2,3,1)
-        #     pair_latent = pair_latent + self.recycle_pair_norm(cyc_latent.detach())
-            # pair_latent = pair_latent + cyc_latent.detach()
-        # breakpoint()
-        # pair_latent = pair_latent.permute(0,2,3,1)
-        latent = self.RNAformer(pair_act=pair_latent, pair_mask=pair_mask, bias=bias, cycle_infer=False)
-
-        logits = self.output_mat(latent)
-
-        return logits
-
-class RiboFormer_rnafm(nn.Module):
-
-    def __init__(self, config, extractor, is_freeze):
-        super().__init__()
-        print(config)
-        self.extractor = extractor
-        # config = config['RNAformer']
-        self.model_dim = config['model_dim']
-        self.is_freeze = is_freeze
-
-        # if config.get("cycling", False):  # Default to False if 'cycling' key is not present
-        #     self.initialize_cycling(config['cycling'])  # Dictionary-style access
-        #     print('cycling')
-        # else:
-        #     self.cycling = False
-
-        # self.seq2mat_embed = EmbedSequence2Matrix(config)
-        self.RNAformer = RNAformerStack(config)
-        self.expand = PairwiseOnly_fm(hidden_size=640, embed_reduction=128)
-
-        # if not config.get("pdb_flag", None):
-        #     self.pdb_embedding = nn.Linear(1, config['model_dim'], bias=True)
-        #     self.use_pdb = True
-        # else:
-        #     self.use_pdb = False
-
-        # Using the `get` method with a default value of `None` if 'binary_output' is not found
-        if not config.get("binary_output", None):
-            self.output_mat = nn.Linear(config['model_dim'], 1, bias=True)
-        else:
-            self.output_mat = nn.Linear(config['model_dim'], 2, bias=False)
-
-        self.initialize(initializer_range=config['initializer_range'])
-
-    def initialize(self, initializer_range):
-
-        nn.init.normal_(self.output_mat.weight, mean=0.0, std=initializer_range)
-
-    def initialize_cycling(self, cycle_steps):
-        import random
-        self.cycling = True
-        self.cycle_steps = cycle_steps
-        self.recycle_pair_norm = nn.LayerNorm(self.model_dim, elementwise_affine=True)
-        self.trng = torch.Generator()
-        self.trng.manual_seed(random.randint(1, 10000))
-
-    def make_pair_mask(self, src, src_len):
-        encode_mask = torch.arange(src.shape[1], device=src.device).expand(src.shape[:2]) < src_len.unsqueeze(1)
-
-        pair_mask = encode_mask[:, None, :] * encode_mask[:, :, None]
-
-        assert isinstance(pair_mask, torch.BoolTensor) or isinstance(pair_mask, torch.cuda.BoolTensor)
-        return torch.bitwise_not(pair_mask)
-
-    @torch.no_grad()
-    def cycle_riboformer(self, pair_act, pair_mask, bias):
-        latent = self.RNAformer(pair_act=pair_act, pair_mask=pair_mask, bias=bias, cycle_infer=True)
-        return latent.detach()
-
-    # def forward(self, src_seq, src_len, pdb_sample, max_cycle=0):
-    def forward(self, data_dict, max_cycle=0):
-        # breakpoint()
-        # pair_mask = self.make_pair_mask(src_seq, src_len)
-        batch_tokens = data_dict['batch_tokens']
-        # input_ids = data_dict['input_ids']
-        attention_mask = data_dict['attention_mask']
-        bias = data_dict['pos_bias']
-
-        if self.is_freeze:
-            with torch.no_grad():
-                output = self.extractor(batch_tokens, repr_layers=[12])
-        else:
-            output = self.extractor(batch_tokens, repr_layers=[12])
-
-        token_embeddings = output["representations"][12] # [3, 71, 640] (bs, seq, dim)
-
-        # hidden_states = output[1]
-        # hidden_states = hidden_states[:,1:-1,:] # bs,l,e
-        pair_latent = self.expand(token_embeddings) # bs,e,l,l
-        # breakpoint()
-        pair_latent = pair_latent.permute(0,2,3,1) # b, l, l, e
-
-        pair_mask = self.make_pair_mask(batch_tokens, data_dict['seq_len'])
-        # print(data_dict['seq_len'])
-
-        # if self.cycling:
-        #     if self.training:
-        #         n_cycles = torch.randint(0, max_cycle + 1, [1])
-        #         if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-        #             n_cycles = n_cycles.to(torch.int64).cuda()
-        #             tensor_list = [torch.zeros(1, dtype=torch.int64).cuda() for _ in
-        #                            range(torch.distributed.get_world_size())]
-        #             torch.distributed.all_gather(tensor_list, n_cycles)
-        #             n_cycles = tensor_list[0]
-        #         n_cycles = n_cycles.item()
-        #     else:
-        #         n_cycles = self.cycle_steps
-
-        #     cyc_latent = torch.zeros_like(pair_latent)
-        #     for n in range(n_cycles - 1):
-        #         res_latent = pair_latent.detach() + self.recycle_pair_norm(cyc_latent.detach()).detach()
-        #         cyc_latent = self.cycle_riboformer(res_latent, pair_mask.detach(), bias.detach())
-            
-        #     # cyc_latent = cyc_latent.permute(0,2,3,1)
-        #     pair_latent = pair_latent + self.recycle_pair_norm(cyc_latent.detach())
-            # pair_latent = pair_latent + cyc_latent.detach()
-        # breakpoint()
-
-        # pair_latent = pair_latent.permute(0,2,3,1)
         latent = self.RNAformer(pair_act=pair_latent, pair_mask=pair_mask, bias=bias, cycle_infer=False)
 
         logits = self.output_mat(latent)

@@ -6,6 +6,14 @@ Predicting RNA secondary structures is crucial for understanding RNA function, d
 
 This repo contain code for pretrained model in `/tiny_llama2`, and code for secondary structure prediction module in `/utils`
 
+## Trained models
+Our pretrained RNA language model and secondary structure prediction model can be downloaded from 
+
+## Inference
+To run the inference script, run:
+
+    ./inference.sh
+
 ## Train
 To run the training script, run:
 
