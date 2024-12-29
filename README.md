@@ -7,7 +7,7 @@ Predicting RNA secondary structures is crucial for understanding RNA function, d
 This repo contain code for pretrained model in `/tiny_llama2`, and code for secondary structure prediction module in `/utils`
 
 ## Trained models
-Our pretrained RNA language model and secondary structure prediction model can be downloaded from the following link: 
+Our pretrained RNA language model and secondary structure prediction model can be downloaded from the following link: [https://huggingface.co/yfish/PriFold](https://huggingface.co/yfish/PriFold)
 
 ### Dataset
 The datasets used in our work (bpRNA, RNAStrAlign, and ArchiveII) can be acquired through the following link: [https://github.com/mxfold/mxfold2/releases/tag/v0.1.0](https://github.com/mxfold/mxfold2/releases/tag/v0.1.0)
