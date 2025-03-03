@@ -1,0 +1,28 @@
+RNAformer:
+  binary_output: false
+  cycling: 6
+  embed_dropout: 0.1
+  ff_factor: 4
+  ff_kernel: 3
+  flash_attn: true
+  gating: false
+  initializer_range: 0.02
+  key_dim_scaler: true
+  learn_ln: true
+  ln_eps: 1.0e-05
+  max_len: 200
+  model_dim: 256
+  n_layers: 6
+  num_head: 4
+  pdb_flag: false
+  pos_embedding: true
+  precision: bf16
+  rel_pos_enc: true
+  resi_dropout: 0.1
+  rotary_emb: false
+  seq_vocab_size: 5
+  softmax_scale: true
+  use_bias: true
+  use_glu: false
+  zero_init: false
+

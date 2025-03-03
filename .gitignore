@@ -1,0 +1,8 @@
+log/
+model/
+data/
+ckpts/
+wandb/
+__pycache__/
+*.pyc
+data.tar.gz
