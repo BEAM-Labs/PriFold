@@ -48,5 +48,22 @@ To run the training script:
 ./train.sh
 ```
 
+# 📚 Citation
+
+If you find this code useful for your research, please cite our paper:
+
+```bibtex
+@inproceedings{yang2025prifold,
+  title={PriFold: Biological Priors Improve RNA Secondary Structure Predictions},
+  author={Yang, Chenchen and Wu, Hao and Shen, Tao and Zou, Kai and Sun, Siqi},
+  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume={39},
+  number={1},
+  pages={950--958},
+  year={2025}
+}
+```
+
+
 ## 🎯 Impact
 Our experimental results not only validate our prediction approach but also highlight the potential of integrating biological priors, such as global characteristics and evolutionary information, into RNA structure prediction tasks, opening new avenues for research in RNA biology and bioinformatics.
